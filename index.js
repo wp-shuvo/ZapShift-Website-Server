@@ -69,7 +69,7 @@ const client = new MongoClient(uri, {
 async function run() {
   try {
     // Connect the client to the server	(optional starting in v4.7)
-    await client.connect();
+    // await client.connect();
 
     const db = client.db('zapShiftDB');
     const userCollection = db.collection('users');
@@ -99,10 +99,6 @@ async function run() {
 
       const email = user.email;
       const userExists = await userCollection.findOne({ email });
-      if (userExists) {
-        return res.status(400).send({ message: 'user already exists' });
-      }
-
       if (userExists) {
         return res.status(400).send({ message: 'user already exists' });
       }
@@ -310,7 +306,7 @@ async function run() {
         updateRiderDoc
       );
 
-      res.send(result, riderResult);
+      res.send({ parcel: result, rider: riderResult });
     });
 
     // parcel delete
