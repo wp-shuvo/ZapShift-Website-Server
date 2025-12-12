@@ -10,7 +10,12 @@ const crypto = require('crypto');
 
 const admin = require('firebase-admin');
 
-const serviceAccount = require('./zapShift-adnim-sdk.json');
+// const serviceAccount = require('./zapShift-adnim-sdk.json');
+
+const decoded = Buffer.from(process.env.FB_SERVICE_KEY, 'base64').toString(
+  'utf8'
+);
+const serviceAccount = JSON.parse(decoded);
 const { stat } = require('fs');
 
 admin.initializeApp({
@@ -428,10 +433,10 @@ async function run() {
     });
 
     // Send a ping to confirm a successful connection
-    await client.db('admin').command({ ping: 1 });
-    console.log(
-      'Pinged your deployment. You successfully connected to MongoDB!'
-    );
+    // await client.db('admin').command({ ping: 1 });
+    // console.log(
+    //   'Pinged your deployment. You successfully connected to MongoDB!'
+    // );
   } finally {
   }
 }
