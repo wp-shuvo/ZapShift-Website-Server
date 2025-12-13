@@ -1,5 +1,4 @@
 const express = require('express');
-const serverless = require('serverless-http');
 const { MongoClient, ServerApiVersion, ObjectId } = require('mongodb');
 const cors = require('cors');
 const app = express();
@@ -11,15 +10,19 @@ const crypto = require('crypto');
 
 const admin = require('firebase-admin');
 
-// const serviceAccount = require('./zapShift-adnim-sdk.json');
+const serviceAccount = require('./zapShift-adnim-sdk.json');
 
-const decoded = Buffer.from(process.env.FB_SERVICE_KEY, 'base64').toString(
-  'utf8'
-);
-const serviceAccount = JSON.parse(decoded);
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount),
 });
+
+// const decoded = Buffer.from(process.env.FB_SERVICE_KEY, 'base64').toString(
+//   'utf8'
+// );
+// const serviceAccount = JSON.parse(decoded);
+// admin.initializeApp({
+//   credential: admin.credential.cert(serviceAccount),
+// });
 
 function generateTrackingId() {
   const prefix = 'ZAP';
@@ -68,11 +71,12 @@ const client = new MongoClient(uri, {
 async function run() {
   try {
     // Connect the client to the server	(optional starting in v4.7)
-    // await client.connect();
+    await client.connect();
 
     const db = client.db('zapShiftDB');
     const userCollection = db.collection('users');
     const riderCollection = db.collection('riders');
+    const trackingsCollection = db.collection('trackings');
     const parcelsCollection = db.collection('parcels');
     const paymentCollection = db.collection('payments');
 
@@ -169,35 +173,10 @@ async function run() {
       res.send(result);
     });
 
-    // get all riders
-    // app.get('/riders', async (req, res) => {
-    //   const { status, district, workStatus } = req.query;
-    //   console.log(status, district, workStatus);
-    //   const query = [];
-
-    //   if (status) {
-    //     query.status = req.query.status;
-    //     // console.log(status, district, workStatus);
-    //   }
-    //   if (district) {
-    //     query.district = req.query.district;
-    //     // console.log(status, district, workStatus);
-    //   }
-    //   if (workStatus) {
-    //     query.workStatus = req.query.workStatus;
-    //     // console.log(status, district, workStatus);
-    //   }
-
-    //   const options = { sort: { createdAt: 1 } };
-    //   const cursor = riderCollection.find({ query, options });
-    //   const riders = await cursor.toArray();
-    //   res.send(riders);
-    // });
-
     app.get('/riders', async (req, res) => {
       const { status, riderDistrict, workStatus } = req.query;
 
-      const query = {}; // must be an object
+      const query = {};
 
       if (status) {
         query.status = status;
@@ -272,14 +251,56 @@ async function run() {
       const parcels = await cursor.toArray();
       res.send(parcels);
     });
-    //
-    app.get('/parcels/:id', async (req, res) => {
+
+    app.get('/parcels/rider', async (req, res) => {
+      const { riderEmail, deliveryStatus } = req.query;
+      const query = {};
+
+      if (riderEmail) {
+        query.riderEmail = riderEmail;
+      }
+
+      if (deliveryStatus !== 'parcel-delivered') {
+        query.deliveryStatus = {
+          // $in: [deliveryStatus, 'rider-ariving', 'parcel-pickup'],
+          $nin: ['parcel-delivered'],
+        };
+      } else {
+        query.deliveryStatus = deliveryStatus;
+      }
+      // need to upload
+
+      const parcels = await parcelsCollection.find(query).toArray();
+      res.send(parcels);
+    });
+
+    //update status
+    app.patch('/parcels/:id/status', async (req, res) => {
+      const { deliveryStatus, riderId } = req.body;
       const id = req.params.id;
       const query = { _id: new ObjectId(id) };
-      const result = await parcelsCollection.findOne(query);
+      const updateDoc = {
+        $set: {
+          deliveryStatus: deliveryStatus,
+        },
+      };
+      //
+      const riderQuery = { _id: new ObjectId(riderId) };
+      const updateRiderDoc = {
+        $set: {
+          workStatus: 'available',
+        },
+      };
+      const riderResult = await riderCollection.updateOne(
+        riderQuery,
+        updateRiderDoc
+      );
+
+      const result = await parcelsCollection.updateOne(query, updateDoc);
       res.send(result);
     });
-    // update parcel info
+
+    // update parcel info Rider Assign
     app.patch('/parcels/:id', async (req, res) => {
       const { riderName, riderEmail, riderId } = req.body;
       const id = req.params.id;
@@ -428,10 +449,10 @@ async function run() {
     });
 
     // Send a ping to confirm a successful connection
-    // await client.db('admin').command({ ping: 1 });
-    // console.log(
-    //   'Pinged your deployment. You successfully connected to MongoDB!'
-    // );
+    await client.db('admin').command({ ping: 1 });
+    console.log(
+      'Pinged your deployment. You successfully connected to MongoDB!'
+    );
   } finally {
   }
 }
