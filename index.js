@@ -8,22 +8,28 @@ const stripe = require('stripe')(process.env.PAYMENT_KEY);
 
 const crypto = require('crypto');
 
+//for local run
+// const admin = require('firebase-admin');
+
+// const serviceAccount = require('./zapShift-adnim-sdk.json');
+
+// admin.initializeApp({
+//   credential: admin.credential.cert(serviceAccount),
+// });
+
+// for vercel run
 const admin = require('firebase-admin');
 
-const serviceAccount = require('./zapShift-adnim-sdk.json');
+const decoded = Buffer.from(process.env.FB_SERVICE_KEY, 'base64').toString(
+  'utf8'
+);
+const serviceAccount = JSON.parse(decoded);
 
 admin.initializeApp({
   credential: admin.credential.cert(serviceAccount),
 });
 
-// const decoded = Buffer.from(process.env.FB_SERVICE_KEY, 'base64').toString(
-//   'utf8'
-// );
-// const serviceAccount = JSON.parse(decoded);
-// admin.initializeApp({
-//   credential: admin.credential.cert(serviceAccount),
-// });
-
+// generate tracking id
 function generateTrackingId() {
   const prefix = 'ZAP';
 
@@ -71,7 +77,7 @@ const client = new MongoClient(uri, {
 async function run() {
   try {
     // Connect the client to the server	(optional starting in v4.7)
-    await client.connect();
+    // await client.connect();
 
     const db = client.db('zapShiftDB');
     const userCollection = db.collection('users');
@@ -90,6 +96,19 @@ async function run() {
         return res.status(403).send({ message: 'forbidden access' });
       }
       next();
+    };
+
+    // tracking related apis
+    const logTracking = async (trackingId, status) => {
+      const log = {
+        trackingId: trackingId,
+        status: status,
+        details: status.split('-').join(' '),
+        createdAt: new Date(),
+      };
+      const result = await trackingsCollection.insertOne(log);
+
+      return result;
     };
 
     // user related apis
@@ -252,6 +271,8 @@ async function run() {
       res.send(parcels);
     });
 
+    // get parcel by rider
+
     app.get('/parcels/rider', async (req, res) => {
       const { riderEmail, deliveryStatus } = req.query;
       const query = {};
@@ -338,6 +359,30 @@ async function run() {
       res.status(200).send(result);
     });
 
+    // parcel by id
+    // Get a single parcel by ID
+    app.get('/parcels/:id', async (req, res) => {
+      try {
+        const id = req.params.id;
+
+        if (!ObjectId.isValid(id)) {
+          return res.status(400).send({ message: 'Invalid parcel ID' });
+        }
+
+        const query = { _id: new ObjectId(id) };
+        const parcel = await parcelsCollection.findOne(query);
+
+        if (!parcel) {
+          return res.status(404).send({ message: 'Parcel not found' });
+        }
+
+        res.send(parcel);
+      } catch (error) {
+        console.error(error);
+        res.status(500).send({ message: 'Server error' });
+      }
+    });
+
     // payments related apis
     app.post('/create-checkout-session', async (req, res) => {
       const paymentInfo = req.body;
@@ -417,6 +462,7 @@ async function run() {
 
         if (session.payment_status === 'paid') {
           const resultPayment = await paymentCollection.insertOne(payment);
+          logTracking(trackingId, 'pending-pickup');
 
           res.send({
             success: true,
@@ -449,10 +495,10 @@ async function run() {
     });
 
     // Send a ping to confirm a successful connection
-    await client.db('admin').command({ ping: 1 });
-    console.log(
-      'Pinged your deployment. You successfully connected to MongoDB!'
-    );
+    // await client.db('admin').command({ ping: 1 });
+    // console.log(
+    //   'Pinged your deployment. You successfully connected to MongoDB!'
+    // );
   } finally {
   }
 }
