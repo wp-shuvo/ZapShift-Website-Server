@@ -413,69 +413,137 @@ async function run() {
       console.log(session);
       res.send({ url: session.url });
     });
+
     //  payment success old
-    app.patch('/payment-success', async (req, res) => {
-      const sessionId = req.query.session_id;
+    // app.patch('/payment-success', async (req, res) => {
+    //   const sessionId = req.query.session_id;
 
-      const session = await stripe.checkout.sessions.retrieve(sessionId);
+    //   const session = await stripe.checkout.sessions.retrieve(sessionId);
 
-      // console.log('session retrieve', session);
-      const transactionId = session.payment_intent;
-      const query = { transactionId: transactionId };
+    //   // console.log('session retrieve', session);
+    //   const transactionId = session.payment_intent;
+    //   const query = { transactionId: transactionId };
 
-      const payment = await paymentCollection.findOne(query);
+    //   const payment = await paymentCollection.findOne(query);
 
-      if (payment) {
-        res.send({
-          message: 'payment already done',
-          transactionId: transactionId,
-          trackingId: payment.trackingId,
+    //   if (payment) {
+    //     res.send({
+    //       message: 'payment already done',
+    //       transactionId: transactionId,
+    //       trackingId: payment.trackingId,
+    //     });
+    //     return;
+    //   }
+    //   const trackingId = generateTrackingId();
+
+    //   if (session.payment_status === 'paid') {
+    //     const id = session.metadata.parcelId;
+    //     const query = { _id: new ObjectId(id) };
+    //     const update = {
+    //       $set: {
+    //         paymentStatus: 'paid',
+    //         deliveryStatus: 'pending-pickup',
+    //         trackingId: trackingId,
+    //       },
+    //     };
+
+    //     const result = await parcelsCollection.updateOne(query, update);
+
+    //     const payment = {
+    //       amount: session.amount_total / 100,
+    //       currency: session.currency,
+    //       customerEmail: session.customer_email,
+    //       parcelId: session.metadata.parcelId,
+    //       parcelName: session.metadata.parcelName,
+    //       transactionId: session.payment_intent,
+    //       paymentStatus: session.payment_status,
+    //       paidAt: new Date(),
+    //       trackingId: trackingId,
+    //     };
+
+    //     if (session.payment_status === 'paid') {
+    //       const resultPayment = await paymentCollection.insertOne(payment);
+    //       logTracking(trackingId, 'pending-pickup');
+
+    //       res.send({
+    //         success: true,
+    //         modifyParcel: result,
+    //         trackingId: trackingId,
+    //         transactionId: session.payment_intent,
+    //         paymentInfo: resultPayment,
+    //       });
+    //     }
+    //   }
+    //   res.send({ success: false });
+    // });
+    app.get('/payment-success', async (req, res) => {
+      try {
+        const sessionId = req.query.session_id;
+
+        if (!sessionId) {
+          return res.status(400).json({ message: 'session_id missing' });
+        }
+
+        const session = await stripe.checkout.sessions.retrieve(sessionId);
+
+        if (session.payment_status !== 'paid') {
+          return res.status(400).json({ message: 'Payment not completed' });
+        }
+
+        const transactionId = session.payment_intent;
+
+        // prevent duplicate insert
+        const existingPayment = await paymentCollection.findOne({
+          transactionId,
         });
-        return;
-      }
-      const trackingId = generateTrackingId();
 
-      if (session.payment_status === 'paid') {
-        const id = session.metadata.parcelId;
-        const query = { _id: new ObjectId(id) };
-        const update = {
-          $set: {
-            paymentStatus: 'paid',
-            deliveryStatus: 'pending-pickup',
-            trackingId: trackingId,
-          },
-        };
+        if (existingPayment) {
+          return res.json({
+            success: true,
+            transactionId,
+            trackingId: existingPayment.trackingId,
+          });
+        }
 
-        const result = await parcelsCollection.updateOne(query, update);
+        const trackingId = generateTrackingId();
+        const parcelId = session.metadata.parcelId;
 
-        const payment = {
+        await parcelsCollection.updateOne(
+          { _id: new ObjectId(parcelId) },
+          {
+            $set: {
+              paymentStatus: 'paid',
+              deliveryStatus: 'pending-pickup',
+              trackingId: trackingId,
+            },
+          }
+        );
+
+        await paymentCollection.insertOne({
           amount: session.amount_total / 100,
           currency: session.currency,
           customerEmail: session.customer_email,
-          parcelId: session.metadata.parcelId,
+          parcelId: parcelId,
           parcelName: session.metadata.parcelName,
-          transactionId: session.payment_intent,
+          transactionId: transactionId,
           paymentStatus: session.payment_status,
           paidAt: new Date(),
           trackingId: trackingId,
-        };
+        });
 
-        if (session.payment_status === 'paid') {
-          const resultPayment = await paymentCollection.insertOne(payment);
-          logTracking(trackingId, 'pending-pickup');
+        await logTracking(trackingId, 'pending-pickup');
 
-          res.send({
-            success: true,
-            modifyParcel: result,
-            trackingId: trackingId,
-            transactionId: session.payment_intent,
-            paymentInfo: resultPayment,
-          });
-        }
+        return res.json({
+          success: true,
+          transactionId,
+          trackingId,
+        });
+      } catch (error) {
+        console.error('Payment success error:', error);
+        return res.status(500).json({ message: 'Internal server error' });
       }
-      res.send({ success: false });
     });
-
+    // get payments by email
     app.get('/payments', verifyFBToken, async (req, res) => {
       const email = req.query.email;
       const query = {};
